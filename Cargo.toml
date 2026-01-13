@@ -1,0 +1,28 @@
+[package]
+name = "dejacmd"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+aes-gcm = "0.10.3"
+chrono = "0.4.42"
+clap = { version = "4.5.54", features = ["derive"] }
+colored = "3.0.0"
+crossbeam = "0.8.4"
+dirs = "6.0.0"
+futures = "0.3"
+hex = "0.4.3"
+include_dir = "0.7.4"
+indicatif = "0.18.3"
+localip = "0.2.1"
+nix = { version = "0.30.1", features = ["user", "process", "fs", "feature"] }
+parking_lot = "0.12.5"
+procfs = { version = "0.18.0" }
+regex = "1.12.2"
+rpassword = "7.3.1"
+serde = { version = "1.0.228", features = ["derive", "rc"] }
+serde_json = "1.0.149"
+short-uuid = "0.2.1"
+sqlx = { version = "0.8.6", features = [ "any", "sqlite", "postgres", "mysql", "runtime-tokio-native-tls" ] }
+tokio = { version = "1.49.0", features = ["full"] }
+uzers = "0.12.2"
