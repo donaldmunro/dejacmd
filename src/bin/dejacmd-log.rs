@@ -459,6 +459,7 @@ fn log(destination: &str, message: String)
    }
 }
 
+#[allow(unused)]
 async fn get_process_info() -> (String, i32, String, PathBuf)
 //------------------------------------------------------------------------------------------------------
 {
@@ -469,8 +470,7 @@ async fn get_process_info() -> (String, i32, String, PathBuf)
    let mut cwd: PathBuf = PathBuf::new();
    let mut user: String = std::env::var("USER").unwrap_or("".to_string());
 
-   //#[cfg(target_os = "linux")]
-   if cfg!(target_os = "linux")
+   #[cfg(target_os = "linux")]
    {
       if let Ok(p) = procfs::process::Process::myself() {
          cwd = p.cwd().unwrap_or(std::path::PathBuf::new());
@@ -492,15 +492,15 @@ async fn get_process_info() -> (String, i32, String, PathBuf)
          shell = std::env::var("SHELL").unwrap_or("".to_string());
       } // or // "/proc/$$/comm"
    }
-   //#[cfg(any(target_os = "macos", target_os = "freebsd"))]
-   else if cfg!(target_os = "macos") || cfg!(target_os = "freebsd")
+
+   #[cfg(any(target_os = "macos", target_os = "freebsd"))]
    {
+      use nix::unistd::{getcwd, getuid, User, Uid};
       cwd = match getcwd()
       {
          Ok(p) => p,
          Err(_) => Settings::get_home_dir()
       };
-      use nix::unistd::{getcwd, getuid, User, Uid};
       let uid: Uid = getuid();
       user_id = uid.as_raw() as i32;
       if let Ok(user_info) = User::from_uid(uid) && let Some(u) = user_info
@@ -509,8 +509,8 @@ async fn get_process_info() -> (String, i32, String, PathBuf)
       }
       shell = std::env::var("SHELL").unwrap_or("".to_string());
    }
-   //#[cfg(target_os = "windows")]
-   else if cfg!(target_os = "windows")
+
+   #[cfg(target_os = "windows")]
    {
       shell = std::env::var("COMSPEC").unwrap_or("".to_string());
       user_id = -1;
@@ -531,7 +531,7 @@ async fn get_process_info() -> (String, i32, String, PathBuf)
    (shell, user_id, user, cwd)
 }
 
-// #[cfg(target_os = "linux")]
+#[cfg(target_os = "linux")]
 fn find_linux_shell(proc: &procfs::process::Process) -> (String, PathBuf)
 //--------------------------------------------------------------
 {

@@ -17,7 +17,6 @@ indicatif = "0.18.3"
 localip = "0.2.1"
 nix = { version = "0.30.1", features = ["user", "process", "fs", "feature"] }
 parking_lot = "0.12.5"
-procfs = { version = "0.18.0" }
 regex = "1.12.2"
 rpassword = "7.3.1"
 serde = { version = "1.0.228", features = ["derive", "rc"] }
@@ -26,3 +25,6 @@ short-uuid = "0.2.1"
 sqlx = { version = "0.8.6", features = [ "any", "sqlite", "postgres", "mysql", "runtime-tokio-native-tls" ] }
 tokio = { version = "1.49.0", features = ["full"] }
 uzers = "0.12.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+procfs = { version = "0.18.0" }
