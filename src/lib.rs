@@ -66,6 +66,23 @@ pub async fn get_database(url: &str, user: &str, password: &str) -> Result<(Opti
    }
    else if scheme.starts_with("sqlite")
    {
+      // On Windows, check if we have an absolute path and need an extra slash
+      #[cfg(target_os = "windows")]
+      {
+         // Check if this is an absolute Windows path (e.g., sqlite://C:\ or sqlite://D:\)
+         // The format should be sqlite:///C:\ (three slashes total)
+         if let Some(path_part) = database_url.strip_prefix("sqlite://")
+         {
+            // Check if it looks like a Windows drive letter path (e.g., C:\, D:\)
+            if path_part.len() >= 2 && path_part.chars().nth(1) == Some(':')
+            {
+               // Add the extra slash to make it sqlite:///
+               database_url = format!("sqlite:///{}", path_part);
+               error_url = database_url.clone();
+            }
+         }
+      }
+
       // Also don't add mode=rwc to in-memory databases in case used in for tests.
       if ! database_url.contains("mode=rwc") && ! database_url.contains(":memory:")
       {

@@ -1045,12 +1045,13 @@ async fn insert_history_entry( local_pool_opt: &Option<sqlx::Pool<sqlx::Any>>,
    {
       cwd = PathBuf::from(pwd);
    }
+   #[allow(unused)]
    let mut user: String = "".to_string();
-   if cfg!(target_os = "windows")
+   #[cfg(target_os = "windows")]
    {
       user = std::env::var("USERNAME").unwrap_or("".to_string());
    }
-   else
+   #[cfg(not(target_os = "windows"))]
    {
       use nix::unistd::{getuid, User, Uid};
       let uid: Uid = getuid();
