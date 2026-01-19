@@ -1,7 +1,8 @@
 use std::error::Error;
 
 use colored::Colorize;
-use sqlx::{Any, AnyPool, Pool};
+use sqlx::{ Any, AnyPool, Pool };
+use tokio::time::{timeout, Duration};
 
 use crate::settings::Settings;
 
@@ -44,8 +45,11 @@ pub async fn get_database(url: &str, user: &str, password: &str) -> Result<(Opti
    let mut database_url = url.to_string();
    let mut error_url = database_url.clone();
    let scheme = database_url.split("://").next().unwrap_or("").to_string();
-   if scheme.starts_with("postgres") || scheme.starts_with("mysql") || scheme.starts_with("mssql")
-   {      
+   let is_postgres = scheme.starts_with("postgres");
+   let is_mysql = scheme.starts_with("mysql");
+   let is_mssql = scheme.starts_with("mssql");
+   if is_postgres || is_mysql || is_mssql
+   {
       if user.is_empty() && password.is_empty()
       {
          let p = database_url.find("@");
@@ -56,13 +60,25 @@ pub async fn get_database(url: &str, user: &str, password: &str) -> Result<(Opti
          }
       }
       else
-      {  
+      {
          let dburl = database_url.replace("{{user}}", user);
          let err_url = error_url.replace("{{user}}", user);
          let n = password.len();
          database_url = dburl.replace("{{password}}", password);
          error_url = err_url.replace("{{password}}", "*".repeat(n).as_str());
-      }   
+      }
+      // Add connection timeout if not already specified
+      let timeout_parameter: String =  if is_postgres { "connect_timeout" } 
+                                       else if is_mysql { "connectTimeout" } 
+                                       else if is_mssql { "Connection Timeout" }
+                                       else { "***" }.to_string();
+
+      if !database_url.contains(timeout_parameter.as_str())
+      {
+         let separator = if database_url.contains("?") { "&" } else { "?" };
+         database_url = format!("{}{}{}=3", database_url, separator, timeout_parameter);
+         error_url = format!("{}{}{}=3", error_url, separator, timeout_parameter);
+      }
    }
    else if scheme.starts_with("sqlite")
    {
@@ -96,21 +112,59 @@ pub async fn get_database(url: &str, user: &str, password: &str) -> Result<(Opti
          }
          error_url = database_url.clone();
       }
+      // Add busy_timeout for SQLite (in milliseconds) which specifies database lock timeout
+      // if !database_url.contains("sqlite_busy_timeout")
+      // {
+      //    if database_url.contains("?")
+      //    {
+      //       database_url = format!("{}&sqlite_busy_timeout=3000", database_url);
+      //       error_url = format!("{}&sqlite_busy_timeout=3000", error_url);
+      //    }
+      //    else
+      //    {
+      //       database_url = format!("{}?sqlite_busy_timeout=3000", database_url);
+      //       error_url = format!("{}?sqlite_busy_timeout=3000", error_url);
+      //    }
+      // }
    }
    else
    {
       return Err( Box::new( std::io::Error::other(
          format!("{} {} [{}]", "Unsupported database scheme: ".red(), scheme.red(), "Supported schemes are: sqlite, postgres, mysql, mssql".bright_red()) ) ) );
    }
-   let pool = match AnyPool::connect(&database_url).await
+
+   let is_sqlite = scheme.starts_with("sqlite");
+   let pool = if is_sqlite
    {
-      Ok(p) => p,
-      Err(e) =>
+      // SQLite connections are local and fast, no timeout needed
+      match AnyPool::connect(&database_url).await
       {
-         return Err( Box::new( std::io::Error::other(
-            format!("{} {} [{}]", "Error connecting to database: ".red(), error_url.red(), e.to_string().bright_red()) ) ) );
+         Ok(p) => p,
+         Err(e) =>
+         {
+            return Err( Box::new( std::io::Error::other(
+               format!("{} {} [{}]", "Error connecting to database: ".red(), error_url.red(), e.to_string().bright_red()) ) ) );
+         }
       }
-   };   
+   }
+   else
+   {
+      // Use tokio timeout for remote database connections
+      match timeout(Duration::from_secs(3), AnyPool::connect(&database_url)).await
+      {
+         Ok(Ok(p)) => p,
+         Ok(Err(e)) =>
+         {
+            return Err( Box::new( std::io::Error::other(
+               format!("{} {} [{}]", "Error connecting to database: ".red(), error_url.red(), e.to_string().bright_red()) ) ) );
+         }
+         Err(_) =>
+         {
+            return Err( Box::new( std::io::Error::other(
+               format!("{} {} [{}]", "Database connection timed out: ".red(), error_url.red(), "Connection took longer than 3 seconds".bright_red()) ) ) );
+         }
+      }
+   };
    Ok((Some(pool), scheme))
 }
 

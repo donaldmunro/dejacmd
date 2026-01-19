@@ -16,17 +16,24 @@ pub struct Settings
    // #[serde(skip)] program: String,
    #[serde(default = "Settings::default_local_database_url")]
    local_database_url:                 String,
-   local_user:                         String,
-   local_encrypted_password:           String,
+   #[serde(skip_serializing_if = "Option::is_none")]
+   local_user:                         Option<String>,
+   #[serde(skip_serializing_if = "Option::is_none")]
+   local_encrypted_password:           Option<String>,
 
-   central_database_url:               String,
-   central_user:                       String,
-   central_encrypted_password:         String,
+   #[serde(skip_serializing_if = "Option::is_none")]
+   central_database_url:               Option<String>,
+   #[serde(skip_serializing_if = "Option::is_none")]
+   central_user:                       Option<String>,
+   #[serde(skip_serializing_if = "Option::is_none")]
+   central_encrypted_password:         Option<String>,
+   #[serde(skip_serializing_if = "Option::is_none")]
+   encryption_key:                     Option<String>,
 
-   encryption_key:                     String,
-
+   #[serde(skip_serializing_if = "Option::is_none")]
    pub last_local_update_file:         Option<String>,
-   pub last_central_update_file:        Option<String>,
+   #[serde(skip_serializing_if = "Option::is_none")]
+   pub last_central_update_file:       Option<String>,
 }
 
 impl Default for Settings
@@ -37,12 +44,12 @@ impl Default for Settings
       Self
       {
          local_database_url: Settings::default_local_database_url(),
-         local_user: String::new(),
-         local_encrypted_password: String::new(),
-         central_database_url: String::new(),
-         central_user: String::new(),
-         central_encrypted_password: String::new(),
-         encryption_key: String::new(),
+         local_user: None,
+         local_encrypted_password: None,
+         central_database_url: None,
+         central_user: None,
+         central_encrypted_password: None,
+         encryption_key: None,
          last_local_update_file: None,
          last_central_update_file: None,
       }
@@ -142,7 +149,7 @@ impl Settings
                {
                   let errmsg = format!("Failed to lock settings file {}: {}", settings_path.display(), e);
                   // println!("{errmsg}");
-                  return Err(std::io::Error::other(errmsg)); 
+                  return Err(std::io::Error::other(errmsg));
                }
                std::thread::sleep(std::time::Duration::from_millis(500));
             }
@@ -169,29 +176,36 @@ impl Settings
    pub fn set_central_database_url(&mut self, url: &str)
    //-----------------------------------------
    {
-      self.central_database_url = url.to_string();
+      if url.trim().is_empty()
+      {
+         self.central_database_url = None;
+      }
+      else
+      {
+         self.central_database_url = Some(url.to_string());
+      }
    }
 
    pub fn get_central_database_url(&self) -> String
    //---------------------------------------
    {
-      self.central_database_url.clone()
+      self.central_database_url.clone().unwrap_or_default()
    }
 
    pub fn get_credentials(&self, is_local: bool) -> Result<(String, String), String>
    //-------------------------------------------------------
    {
-      let user: &String;
-      let encrypted_password: &String;
+      let user: String;
+      let encrypted_password: String;
       if is_local
       {
-         user = &self.local_user;
-         encrypted_password = &self.local_encrypted_password;
+         user = self.local_user.clone().unwrap_or_default();
+         encrypted_password = self.local_encrypted_password.clone().unwrap_or_default();
       }
       else
       {
-         user = &self.central_user;
-         encrypted_password = &self.central_encrypted_password;
+         user = self.central_user.clone().unwrap_or_default();
+         encrypted_password = self.central_encrypted_password.clone().unwrap_or_default();
       }
       if encrypted_password.trim().is_empty()
       {
@@ -211,15 +225,16 @@ impl Settings
          return Ok((user.clone(), "".to_string()));
       }
       {
-         if self.encryption_key.trim().is_empty()
+         let key = match self.encryption_key.clone()
          {
-            return Err("Encryption key is missing".to_string());
-         }
-         match crypt::decrypt(&encrypted_bytes, &self.encryption_key)
+            |  Some(k) => k,
+               None => { return Err("Encryption key is missing".to_string()); }
+         };
+         match crypt::decrypt(&encrypted_bytes, &key)
          {
             |  Ok(decrypted_password) =>
                {
-                  Ok((user.clone(), decrypted_password))
+                  Ok((user, decrypted_password))
                }
                Err(e) =>
                {
@@ -240,7 +255,11 @@ impl Settings
       }
       else
       {
-         self.central_database_url = url.to_string();
+         self.central_database_url = match url.trim().is_empty()
+         {
+            | true => None,
+            | false => Some(url.to_string()),
+         };
       }
       match self.write_settings()
       {
@@ -259,11 +278,19 @@ impl Settings
    {
       if is_local
       {
-         self.local_user = user.to_string();
+         self.local_user = match user.trim().is_empty()
+         {
+            | true => None,
+            | false => Some(user.to_string()),
+         };
       }
       else
       {
-         self.central_user = user.to_string();
+         self.central_user = match user.trim().is_empty()
+         {
+            | true => None,
+            | false => Some(user.to_string()),
+         };
       }
       match self.write_settings()
       {
@@ -280,7 +307,7 @@ impl Settings
    pub fn set_password(&mut self, password: &str, is_local: bool) -> Result<(), String>
    //----------------------------------------------------------------
    {
-      let encrypted_password: &mut String;
+      let encrypted_password: &mut Option<String>;
       if is_local
       {
          encrypted_password = &mut self.local_encrypted_password;
@@ -291,7 +318,7 @@ impl Settings
       }
       if password.trim().is_empty()
       {
-         encrypted_password.clear();
+         *encrypted_password = None;
          match self.write_settings()
          {
             | Ok(_) => (),
@@ -304,22 +331,27 @@ impl Settings
          }
          return Ok(());
       }
-      if self.encryption_key.trim().is_empty()
+      let key = match &self.encryption_key
       {
-         let key = Aes256Gcm::generate_key(&mut OsRng);
-         self.encryption_key = hex::encode(key);
-      }
-      match crypt::encrypt(&password, &self.encryption_key)
+         |  Some(k) => k.clone(),
+            None =>
+            {
+               let new_key = Aes256Gcm::generate_key(&mut OsRng);
+               self.encryption_key = Some(hex::encode(new_key));
+               self.encryption_key.clone().unwrap()
+            }
+      };
+      match crypt::encrypt(&password, &key)
       {
          | Ok(encrypted_data) =>
          {
             if is_local
             {
-               self.local_encrypted_password = hex::encode(encrypted_data);
+               self.local_encrypted_password = Some(hex::encode(encrypted_data));
             }
             else
             {
-               self.central_encrypted_password = hex::encode(encrypted_data);
+               self.central_encrypted_password = Some(hex::encode(encrypted_data));
             }
             match self.write_settings()
             {
@@ -346,8 +378,8 @@ impl Settings
    pub fn set_user_password(&mut self, user: &str, password: &str, is_local: bool) -> Result<(), String>
    //----------------------------------------------------------------
    {
-      let usr: &mut String;
-      let encrypted_password: &mut String;
+      let usr: &mut Option<String>;
+      let encrypted_password: &mut Option<String>;
       if is_local
       {
          usr = &mut self.local_user;
@@ -360,8 +392,12 @@ impl Settings
       }
       if password.trim().is_empty()
       {
-         *usr = user.to_string();
-         encrypted_password.clear();
+         *usr = match user.trim().is_empty()
+         {
+            | true => None,
+            | false => Some(user.to_string()),
+         };
+         *encrypted_password = None;
          match self.write_settings()
          {
             | Ok(_) => (),
@@ -374,17 +410,26 @@ impl Settings
          }
          return Ok(());
       }
-      if self.encryption_key.trim().is_empty()
+      let key = match self.encryption_key.clone()
       {
-         let key = Aes256Gcm::generate_key(&mut OsRng);
-         self.encryption_key = hex::encode(key);
-      }
-      match crypt::encrypt(&password, &self.encryption_key)
+         |  Some(k) => k,
+            None =>
+            {
+               let new_key = Aes256Gcm::generate_key(&mut OsRng);
+               self.encryption_key = Some(hex::encode(new_key));
+               self.encryption_key.clone().unwrap()
+            }
+      };
+      match crypt::encrypt(&password, &key)
       {
          | Ok(encrypted_data) =>
          {
-            *usr = user.to_string();
-            *encrypted_password = hex::encode(encrypted_data);
+            *usr = match user.trim().is_empty()
+            {
+               | true => None,
+               | false => Some(user.to_string()),
+            };
+            *encrypted_password = Some(hex::encode(encrypted_data));
             match self.write_settings()
             {
                | Ok(_) => (),
@@ -457,7 +502,7 @@ impl Settings
                   }
                }
             }
-            else if env::consts::OS == "macos"            
+            else if env::consts::OS == "macos"
             {
                config_path.push(Settings::get_home_dir());
                config_path.push(".config/");
@@ -608,12 +653,12 @@ impl Settings
    {
       Self {
          local_database_url: local_url.to_string(),
-         local_user: String::new(),
-         local_encrypted_password: String::new(),
-         central_database_url: central_url.to_string(),
-         central_user: String::new(),
-         central_encrypted_password: String::new(),
-         encryption_key: String::new(),
+         local_user: None,
+         local_encrypted_password: None,
+         central_database_url: if central_url.is_empty() { None } else { Some(central_url.to_string()) },
+         central_user: None,
+         central_encrypted_password: None,
+         encryption_key: None,
          last_local_update_file: None,
          last_central_update_file: None,
       }

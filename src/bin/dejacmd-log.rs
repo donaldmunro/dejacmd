@@ -47,7 +47,7 @@ async fn apply_database_updates(log_destination: &str)
       Err(e) =>
       {
          log(&log_destination,
-            format!("{} {} [{}] - {}", "Error loading settings file ", settings_file, e,
+            format!("{} {} [{}] - {}", "dejacmd-log: Error loading settings file ", settings_file, e,
                "Creating/using default settings with SQLite database."));
          _ = Settings::write_default_settings();
          Settings::default()
@@ -83,7 +83,7 @@ async fn apply_database_updates(log_destination: &str)
       Ok(c) => c,
       Err(e) => 
       {
-         log(log_destination, format!("apply_database_updates: Error connecting to database(s): {}", e));
+         log(log_destination, format!("dejacmd-log: apply_database_updates: Error connecting to database(s): {}", e));
          return;
       }
    };
@@ -117,7 +117,7 @@ async fn apply_database_updates(log_destination: &str)
             let result =  sqlx::query(&sql).execute(pool).await;
             if result.is_err()
             {
-               local_error_messages.push(format!("Failed to execute update {}: {}", filename, result.as_ref().err().unwrap().to_string()));
+               local_error_messages.push(format!("dejacmd-log: Failed to execute update {}: {}", filename, result.as_ref().err().unwrap().to_string()));
             }
             else
             {
@@ -141,7 +141,7 @@ async fn apply_database_updates(log_destination: &str)
             let result =  sqlx::query(&sql).execute(pool).await;
             if result.is_err()
             {
-               central_error_messages.push(format!("Failed to execute update {}: {}", filename, result.as_ref().err().unwrap().to_string()));
+               central_error_messages.push(format!("dejacmd-log: Failed to execute update {}: {}", filename, result.as_ref().err().unwrap().to_string()));
             }
             else
             {
@@ -167,7 +167,7 @@ async fn apply_database_updates(log_destination: &str)
                match settings.write_settings()
                {
                   Ok(_) => {},
-                  Err(e) => log(log_destination, format!("Error saving updated last_update_file '{}' to settings: {}", final_update, e)),
+                  Err(e) => log(log_destination, format!("dejacmd-log: Error saving updated last_update_file '{}' to settings: {}", final_update, e)),
                }
             }
          }
@@ -187,7 +187,7 @@ async fn apply_database_updates(log_destination: &str)
                match settings.write_settings()
                {
                   Ok(_) => {},
-                  Err(e) => log(log_destination, format!("Error saving updated last_update_file '{}' to settings: {}", final_update, e)),
+                  Err(e) => log(log_destination, format!("dejacmd-log: Error saving updated last_update_file '{}' to settings: {}", final_update, e)),
                }
             }
          }
@@ -239,7 +239,7 @@ async fn main() -> std::process::ExitCode
       Err(e) =>
       {
          log(&args.log_destination,
-            format!("{} {} [{}] - {}", "Error loading settings file ", settings_file, e,
+            format!("{} {} [{}] - {}", "dejacmd-log: Error loading settings file ", settings_file, e,
                "Creating/using default settings with SQLite database."));
          _ = Settings::write_default_settings();
          Settings::default()
@@ -273,7 +273,7 @@ async fn main() -> std::process::ExitCode
          Ok((pool, scheme)) => (pool, scheme),
          Err(e) =>
          {
-            let errmsg = format!("{} {}", "Error connecting to local database:", e);
+            let errmsg = format!("{} {}", "dejacmd-log: Error connecting to local database:", e);
             local_error_messages.push(errmsg);
             return Ok(sqlx::any::AnyQueryResult::default());
          }
@@ -284,14 +284,14 @@ async fn main() -> std::process::ExitCode
          let mut result =  sqlx::query( CREATE_TABLE_SQL ).execute(pool).await;
          if result.is_err()
          {
-            local_error_messages.push(format!("{} {}", "Error creating table in local database:", result.as_ref().err().unwrap().to_string()));
+            local_error_messages.push(format!("{} {}", "dejacmd-log: Error creating table in local database:", result.as_ref().err().unwrap().to_string()));
             return result;
          }
          local_location = 3;
          result = sqlx::query( CREATE_INDEX_SQL ).execute(pool).await;
          if result.is_err()
          {
-            local_error_messages.push(format!("{} {}", "Error creating index in local database:", result.as_ref().err().unwrap().to_string()));
+            local_error_messages.push(format!("{} {}", "dejacmd-log: Error creating index in local database:", result.as_ref().err().unwrap().to_string()));
             return result;
          }
          local_location = 4;
@@ -313,7 +313,7 @@ async fn main() -> std::process::ExitCode
             let values = format!("VALUES ( {}, {}, {}, {}, {}, {}, {}, {}, {} )",
                id, command_date.clone(), cwd.display(), shell.clone(), os_user_id, os_user.clone(),
                ip.clone(), args.status, command.clone() );
-            local_error_messages.push(format!("{}: {} {}", "Error inserting command into local database:", sql, values));
+            local_error_messages.push(format!("{}: {} {}", "dejacmd-log: Error inserting command into local database:", sql, values));
          }
          result
       }
@@ -340,7 +340,7 @@ async fn main() -> std::process::ExitCode
          Ok((pool, scheme)) => (pool, scheme),
          Err(e) =>
          {
-            let errmsg = format!("{} {}", "Error connecting to central database:", e);
+            let errmsg = format!("{} {}", "dejacmd-log: Error connecting to central database:", e);
             central_error_messages.push(errmsg);
             return Ok(sqlx::any::AnyQueryResult::default());
          }
@@ -352,14 +352,14 @@ async fn main() -> std::process::ExitCode
          let mut result =  sqlx::query( CREATE_TABLE_SQL ).execute(pool).await;
          if result.is_err()
          {
-            central_error_messages.push(format!("{} {}", "Error creating table in central database:", result.as_ref().err().unwrap().to_string()));
+            central_error_messages.push(format!("{} {}", "dejacmd-log: Error creating table in central database:", result.as_ref().err().unwrap().to_string()));
             return result;
          }
          central_location = 3;
          result = sqlx::query( CREATE_INDEX_SQL ).execute(pool).await;
          if result.is_err()
          {
-            central_error_messages.push(format!("{} {}", "Error creating index in central database:", result.as_ref().err().unwrap().to_string()));
+            central_error_messages.push(format!("{} {}", "dejacmd-log: Error creating index in central database:", result.as_ref().err().unwrap().to_string()));
             return result;
          }
          central_location = 4;
@@ -381,7 +381,7 @@ async fn main() -> std::process::ExitCode
             let values = format!("VALUES ( {}, {}, {}, {}, {}, {}, {}, {}, {} )",
                id, command_date.clone(), cwd.display(), shell.clone(), os_user_id, os_user.clone(),
                ip.clone(), args.status, command.clone() );
-            central_error_messages.push(format!("{}: {} {}", "Error inserting command into central database:", sql, values));
+            central_error_messages.push(format!("{}: {} {}", "dejacmd-log: Error inserting command into central database:", sql, values));
          }
          result
       }
@@ -397,13 +397,13 @@ async fn main() -> std::process::ExitCode
    if local_result.is_err()
    {
       log(&args.log_destination, 
-         format!("{} ({}) {}", "Error inserting command into local history database:", local_location, local_result.err().unwrap().to_string()));
+         format!("{} ({}) {}", "dejacmd-log: Error inserting command into local history database:", local_location, local_result.err().unwrap().to_string()));
       status |= 1;
    }
    if central_result.is_err()
    {
       log(&args.log_destination, 
-         format!("{} ({}) {}", "Error inserting command into central history database:", central_location, central_result.err().unwrap().to_string()));
+         format!("{} ({}) {}", "dejacmd-log: Error inserting command into central history database:", central_location, central_result.err().unwrap().to_string()));
       status |= 2;
    }
    if local_error_messages.len() > 0
@@ -446,14 +446,14 @@ fn log(destination: &str, message: String)
          Ok(f) => f,
          Err(e) =>
          {
-            eprintln!("{} {} [{}]", "Error opening log file:".red(), destination.red(), e.to_string().bright_red());
+            eprintln!("{} {} [{}]", "dejacmd-log: Error opening log file:".red(), destination.red(), e.to_string().bright_red());
             eprintln!("Log message was: {}", message);
             return;
          }
       };
       if let Err(e) = writeln!(file, "{}", message)
       {
-         eprintln!("{} {} [{}]", "Error writing to log file:".red(), destination.red(), e.to_string().bright_red());
+         eprintln!("{} {} [{}]", "dejacmd-log: Error writing to log file:".red(), destination.red(), e.to_string().bright_red());
          eprintln!("Log message was: {}", message);
       }
    }

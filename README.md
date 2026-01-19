@@ -82,21 +82,29 @@ dejacmd_hook() {
 }
 precmd_functions+=(dejacmd_hook)
 ```
+
 #### PowerShell
 
 1. Check if you have a profile script by running: 
-```pwsh 
+
+```pwsh
 Test-Path $PROFILE
 ```
+
 If it returns false you need to create one by running:
+
 ```pwsh
 New-Item -Type File -Path $PROFILE -Force
 ```
+
 2. Open the profile script in a text editor:
+
 ```pwsh
 notepad $PROFILE
 ```
+
 3. Add the prompt function to the profile script by adding the following lines:
+
 ```pwsh
 function prompt {
     # 1. Capture the numerical exit code of the last command
@@ -123,11 +131,13 @@ function prompt {
     "PS $($executionContext.SessionState.Path.CurrentLocation)> "
 }
 ```
+
 4. Save and logout/exit to restart PowerShell.
 
 ### Database Configuration
 
 Dejacmd uses a JSON configuration file located at:
+
 * Linux: `~/.config/dejacmd/settings.json`
 * Macos: `~/.config/dejacmd/settings.json` or `~/Library/Application Support/dejacmd/settings.json` or `~/dejacmd/settings.json` 
 * Windows: `%APPDATA%\dejacmd\settings.json` (`AppData/Local/dejacmd/settings.json` or `Local Settings/dejacmd/settings.json` or `Application Data/dejacmd/Local Settings/settings.json`) 
