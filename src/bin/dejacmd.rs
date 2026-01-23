@@ -56,6 +56,9 @@ enum Commands
       #[arg(short = 'i', long="no-case", help = "Case insensitive search")]
       is_ignore_case: bool,
 
+      #[arg(short = 'r', long="reverse", help = "Reverse result order (oldest first)")]
+      is_sort_reversed: bool,
+
       #[arg(short = 't', long="no-time", help = "Don't show timestamps in output")]
       is_not_show_time: bool,
 
@@ -63,11 +66,12 @@ enum Commands
       is_unique: bool,
 
       #[arg(short = 's', long="start", default_value = "",
-         help = "Start timestamp for search in YYYY-MM-DD_HH:MM:SS format (if no time specified, assumes 00:00:00)")]
+         help = r#"Start timestamp for search in YYYY-MM-DD_HH:MM:SS or "YYYY-MM-DD HH:MM:SS" format. Use now for current time"#)]
       start_time: Option<String>,
 
       #[arg(short = 'e', long="end", default_value = "",
-         help = "End timestamp for search in YYYY-MM-DD_HH:MM:SS format (if no time specified, assumes 00:00:00)")]
+         help = r#"End timestamp for search in YYYY-MM-DD_HH:MM:SS or "YYYY-MM-DD HH:MM:SS" format. Use now for current time. 
+         If start is specified and end is not, defaults to current time."#)]
       end_time: Option<String>,      
    },
 
@@ -161,7 +165,7 @@ async fn main()
 
    match args.command
    {
-      Commands::Search { search_spec, number, is_ignore_case, is_central_search_query, is_not_show_time, is_unique,
+      Commands::Search { search_spec, number, is_sort_reversed, is_ignore_case, is_central_search_query, is_not_show_time, is_unique,
          start_time, end_time } =>
       {         
          let spec: String;
@@ -174,7 +178,7 @@ async fn main()
             spec = search_spec.clone().unwrap();
          }
          let is_time = ! is_not_show_time && !is_unique;
-         if let Err(e) = search(&spec, number, is_ignore_case, is_central_search_query, is_time, is_unique,
+         if let Err(e) = search(&spec, number, is_sort_reversed, is_ignore_case, is_central_search_query, is_time, is_unique,
             start_time, end_time, &settings).await
          {
             eprintln!("{}: {}", "Error searching history".bright_red(), e);
@@ -260,12 +264,21 @@ async fn main()
 fn parse_time_range(start_time: &Option<String>, end_time: &Option<String>) -> Result<(Option<String>, Option<String>), String>
 //----------------------------------------------------------------------------------------------------------------------------------------------
 {
+   let get_now = ||
+   {
+      chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string()
+   };
+
    let start_datetime = if let Some(start) = start_time
    {
       if start.trim().is_empty()
       {
          None
       }
+      // else if start.trim().eq_ignore_ascii_case("now")
+      // {
+      //    Some(get_now())
+      // }
       else
       {
          Some(parse_datetime_string(start)?)
@@ -283,13 +296,16 @@ fn parse_time_range(start_time: &Option<String>, end_time: &Option<String>) -> R
          if start_datetime.is_some()
          {
             // Default to current time if start is specified but end is not
-            let now = chrono::Utc::now();
-            Some(now.format("%Y-%m-%d %H:%M:%S").to_string())
+            Some(get_now())
          }
          else
          {
             None
          }
+      }
+      else if end.trim().eq_ignore_ascii_case("now")
+      {
+         Some(get_now())
       }
       else
       {
@@ -299,8 +315,7 @@ fn parse_time_range(start_time: &Option<String>, end_time: &Option<String>) -> R
    else if start_datetime.is_some()
    {
       // Default to current time if start is specified but end is not
-      let now = chrono::Utc::now();
-      Some(now.format("%Y-%m-%d %H:%M:%S").to_string())
+      Some(get_now())
    }
    else
    {
@@ -318,11 +333,13 @@ fn parse_datetime_string(datetime_str: &str) -> Result<String, String>
    // Check if time is included (contains underscore or colon)
    if datetime_str.contains('_') || datetime_str.matches(':').count() >= 1
    {
-      // Full datetime format: YYYY-MM-DD_HH:MM:SS or YYYY-MM-DD HH:MM:SS
+      // Full datetime format: YYYY-MM-DD_HH:MM:SS or YYYY-MM-DD HH:MM:SS    
+      // let mut format = "%Y-%m-%d %H:%M:%S";  
       let normalized = datetime_str.replace('_', " ");
-
+      let format = parse_year_format(&normalized, true)?;
+      
       // Try to parse to validate the format
-      match chrono::NaiveDateTime::parse_from_str(&normalized, "%Y-%m-%d %H:%M:%S")
+      match chrono::NaiveDateTime::parse_from_str(&normalized, format)
       {
          Ok(_) => Ok(normalized),
          Err(_) =>
@@ -330,9 +347,12 @@ fn parse_datetime_string(datetime_str: &str) -> Result<String, String>
             // Try parsing with just date and time without seconds
             if normalized.matches(':').count() == 1
             {
-               match chrono::NaiveDateTime::parse_from_str(&format!("{} 00", normalized), "%Y-%m-%d %H:%M:%S")
+               match chrono::NaiveDateTime::parse_from_str(&format!("{}:00", normalized), format)
                {
-                  Ok(dt) => Ok(dt.format("%Y-%m-%d %H:%M:%S").to_string()),
+                  Ok(dt) => 
+                  {
+                     Ok(dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                  },
                   Err(e) => Err(format!("Invalid datetime format '{}'. Expected YYYY-MM-DD_HH:MM:SS or YYYY-MM-DD_HH:MM. Error: {}", datetime_str, e))
                }
             }
@@ -346,16 +366,45 @@ fn parse_datetime_string(datetime_str: &str) -> Result<String, String>
    else
    {
       // Date only format: YYYY-MM-DD, assume 00:00:00
-      match chrono::NaiveDate::parse_from_str(datetime_str, "%Y-%m-%d")
+      let format = parse_year_format(datetime_str, false)?;      
+      match chrono::NaiveDate::parse_from_str(datetime_str, format)
       {
          Ok(date) =>
          {
             let datetime = date.and_hms_opt(0, 0, 0).ok_or_else(|| "Invalid date".to_string())?;
-            Ok(datetime.format("%Y-%m-%d %H:%M:%S").to_string())
+            // let mut s = format.to_string();
+            // s.push_str(" %H:%M:%S");
+            // let format = s.as_str();
+            let format = "%Y-%m-%d %H:%M:%S";
+            Ok(datetime.format(format).to_string())
          }
          Err(e) => Err(format!("Invalid date format '{}'. Expected YYYY-MM-DD. Error: {}", datetime_str, e))
       }
    }
+}
+
+fn parse_year_format(normalized: &str, is_time: bool) -> Result<&'static str, String>
+//--------------------------------------------------------------------
+{   
+   let datetime_parts: Vec<&str> = normalized.split(' ').collect();
+   let date_part = if datetime_parts.is_empty() { normalized } else { datetime_parts[0] };      
+   let date_parts = date_part.split('-').collect::<Vec<&str>>();
+   if ! date_parts.is_empty() && date_parts[0].trim().len() < 4
+   {
+      if date_parts[0].trim().len() == 2
+      {
+         if is_time { return Ok("%y-%m-%d %H:%M:%S"); } else { return Ok("%y-%m-%d"); }
+      }
+      else
+      {
+         return Err(format!("Invalid year format {} in '{}'. Expected YYYY-MM-DD", date_parts[0].trim(), normalized));
+      }
+   }
+   if ! is_time
+   {
+      return Ok("%Y-%m-%d");
+   }
+   Ok("%Y-%m-%d %H:%M:%S")    
 }
 
 async fn import_history(shell_history_file: &str, is_truncate: bool, settings: &Settings) -> Result<(), String>
@@ -381,8 +430,9 @@ async fn import_history(shell_history_file: &str, is_truncate: bool, settings: &
    }
 }
 
-pub async fn search(spec: &str, mut no: u64, is_ignore_case: bool, is_central: bool, is_show_time: bool, is_unique: bool,
-   start_time: Option<String>, end_time: Option<String>, settings: &Settings) -> Result<(), String>
+#[allow(clippy::too_many_arguments)]
+pub async fn search(spec: &str, mut no: u64, is_sort_reversed: bool, is_ignore_case: bool, is_central: bool, is_show_time: bool, 
+   is_unique: bool, start_time: Option<String>, end_time: Option<String>, settings: &Settings) -> Result<(), String>
 //------------------------------------------------------------------------------------------------------
 {
    // Validate date parameters
@@ -466,7 +516,7 @@ pub async fn search(spec: &str, mut no: u64, is_ignore_case: bool, is_central: b
           where_conditions.join(" AND ")
        };
 
-       let order = "command_timestamp DESC";
+       let order = if is_sort_reversed { "command_timestamp" } else { "command_timestamp DESC" };
        let limit = if no > 0 { format!("LIMIT {}", no) } else { "".to_string() };
        let sql = format!("SELECT {} FROM {} WHERE {} ORDER BY {} {}", select, from, wher, order, limit);
        let query = fix_placeholders(&sql, &scheme);
@@ -487,6 +537,9 @@ pub async fn search(spec: &str, mut no: u64, is_ignore_case: bool, is_central: b
        {
           query_builder = query_builder.bind(end);
        }
+       println!("{} {} {} {}", "Search Term:".bright_cyan().bold(), spec.bright_white(), 
+          if start_datetime.is_some() { format!(" {} {}", " Start: ".bright_cyan().bold(), start_datetime.clone().unwrap().bright_white()) } else { "".to_string() },
+          if end_datetime.is_some() { format!(" {} {}", " End: ".bright_cyan().bold(), end_datetime.clone().unwrap().bright_white()) } else { "".to_string() } );
 
        let rows = query_builder
             // .bind(no as i64)

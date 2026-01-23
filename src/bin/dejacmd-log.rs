@@ -33,6 +33,8 @@ struct Args
 
 pub(crate) static ASSETS_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/assets");
 
+const REGEX: &str = r"^\s*(\d+)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(.+)$";
+
 async fn apply_database_updates(log_destination: &str)
 //----------------------------------------------------------------------------------------------------------------------
 {
@@ -206,7 +208,7 @@ async fn main() -> std::process::ExitCode
    apply_database_updates(&args.log_destination).await;
 
    // 66774  2026-01-13 17:45:51 ls -ltrh 
-   let re = Regex::new(r"^\s*(\d+)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(.+)$").unwrap();
+   let re = Regex::new(REGEX).unwrap();
 
    let text = args.history;
    let command_date: String;
@@ -219,7 +221,7 @@ async fn main() -> std::process::ExitCode
    }
    else
    {
-      log(&args.log_destination, format!("{} '{}'", "Failed to parse history line:", &text));
+      log(&args.log_destination, format!("{} '{}'", "dejacmd-log: Failed to parse history line:", &text));
       return std::process::ExitCode::from(1);
    }
    let ip = match localip::get_local_ip()
@@ -572,4 +574,30 @@ fn find_linux_shell(proc: &procfs::process::Process) -> (String, PathBuf)
       };
    }
    (shell, cwd)
+}
+
+#[cfg(test)]
+// cargo test --bin dejacmd-log
+mod tests 
+{
+    use regex::Regex;
+
+    #[test]
+    fn test_history_regex() 
+    {
+        let re = Regex::new(crate::REGEX).unwrap();
+        let text = "66774  2026-01-13 17:45:51 ls -ltrh ";
+        let capture = re.captures(text).unwrap();
+        assert_eq!(&capture[1], "66774");
+        assert_eq!(&capture[2], "2026-01-13 17:45:51");
+        assert_eq!(&capture[3], "ls -ltrh ");
+
+      //  An * shouldn't occur for fc ... -1 - could extend REGEX to handle it or just remove the * if '\d.*\*.*' matches.
+      //   (According to LLM means this entry is the most recently executed command (i.e., the fc command itself))
+      //   let text = "10038* 2026-01-22 17:04:24   cd /src/Rust/dejacmd";
+      //   let capture = re.captures(text).unwrap();
+      //   assert_eq!(&capture[1], "10038");
+      //   assert_eq!(&capture[2], "2026-01-22 17:04:24");
+      //   assert_eq!(&capture[3], "cd /src/Rust/dejacmd");
+    }
 }
