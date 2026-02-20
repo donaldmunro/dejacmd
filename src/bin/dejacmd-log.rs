@@ -34,169 +34,7 @@ struct Args
 pub(crate) static ASSETS_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/assets");
 
 const REGEX: &str = r"^\s*(\d+)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(.+)$";
-
-async fn apply_database_updates(log_destination: &str)
-//----------------------------------------------------------------------------------------------------------------------
-{
-   let settings_file = match Settings::get_settings_path()
-   {
-      Ok(p) => p.display().to_string(),
-      Err(_e) => "".to_string()
-   };
-   let mut settings = match Settings::new().get_settings()
-   {
-      Ok(s) => s,
-      Err(e) =>
-      {
-         log(&log_destination,
-            format!("{} {} [{}] - {}", "dejacmd-log: Error loading settings file ", settings_file, e,
-               "Creating/using default settings with SQLite database."));
-         _ = Settings::write_default_settings();
-         Settings::default()
-      }
-   };
-   let last_local_update = settings.last_local_update_file.clone().unwrap_or_else(|| "0000000.sql".to_string());
-   let last_central_update = settings.last_central_update_file.clone().unwrap_or_else(|| "0000000.sql".to_string());
-
-   // Collect and sort SQL update files
-   let mut sql_files: Vec<_> = ASSETS_DIR.files()
-      .filter(|file| {
-         let path_str = file.path().to_string_lossy();
-         path_str.ends_with(".sql") &&
-         path_str.chars().take(7).all(|c| c.is_ascii_digit() || c == '/')
-      })
-      .collect();
-
-   sql_files.sort_by_key(|file| {
-      file.path().file_name().and_then(|n| n.to_str()).unwrap_or("")
-   });
-   let last_file = sql_files.last()
-      .and_then(|file| file.path().file_name().and_then(|n| n.to_str()))
-      .unwrap_or("");
-   if last_file <= last_local_update.as_str() && last_file <= last_central_update.as_str()
-   {
-      return;
-   }
-
-   let new_last_local_update: AtomicCell<String> = AtomicCell::new("".to_string());
-   let new_last_central_update: AtomicCell<String> = AtomicCell::new("".to_string());
-   let (local_pool_opt, local_scheme, central_pool_opt, central_scheme) = match connections(&settings, false, false).await
-   {
-      Ok(c) => c,
-      Err(e) => 
-      {
-         log(log_destination, format!("dejacmd-log: apply_database_updates: Error connecting to database(s): {}", e));
-         return;
-      }
-   };
-
-   // Execute updates after the last one
-   for file in sql_files 
-   {
-      let filename = file.path().file_name()
-         .and_then(|n| n.to_str())
-         .unwrap_or("");
-
-      // Read and execute the SQL script
-      let mut local_error_messages: Vec<String> = vec![];
-      let mut central_error_messages: Vec<String> = vec![];
-      if let Some(sql_content) = file.contents_utf8() 
-      {
-         let local_queries = async
-         //==========================================================
-         {
-            if local_pool_opt.is_none()
-            {
-               return Ok(sqlx::any::AnyQueryResult::default());
-            }
-            if filename <= last_local_update.as_str()
-            {
-               return Ok(sqlx::any::AnyQueryResult::default());
-            }
-
-            let pool = local_pool_opt.as_ref().unwrap();
-            let sql = dejacmd::fix_placeholders(sql_content, &local_scheme);
-            let result =  sqlx::query(&sql).execute(pool).await;
-            if result.is_err()
-            {
-               local_error_messages.push(format!("dejacmd-log: Failed to execute update {}: {}", filename, result.as_ref().err().unwrap().to_string()));
-            }
-            else
-            {
-               new_last_local_update.store(filename.to_string());
-            }         
-            result   
-         };
-         let central_queries = async
-         //============================================================
-         {
-            if central_pool_opt.is_none()
-            {
-               return Ok(sqlx::any::AnyQueryResult::default());
-            }
-            if filename <= last_central_update.as_str()
-            {
-               return Ok(sqlx::any::AnyQueryResult::default());
-            }
-            let pool = central_pool_opt.as_ref().unwrap();
-            let sql = dejacmd::fix_placeholders(sql_content, &central_scheme);
-            let result =  sqlx::query(&sql).execute(pool).await;
-            if result.is_err()
-            {
-               central_error_messages.push(format!("dejacmd-log: Failed to execute update {}: {}", filename, result.as_ref().err().unwrap().to_string()));
-            }
-            else
-            {
-               new_last_central_update.store(filename.to_string());
-            }         
-            result   
-         };
-
-         let (local_result, central_result) = tokio::join!(local_queries, central_queries);
-         if local_result.is_err() 
-         {
-            for msg in &local_error_messages
-            {
-               log(log_destination, format!("Local apply_database_updates: {}", msg));
-            }
-         }
-         else
-         {
-            let final_update = new_last_local_update.take();
-            if !final_update.is_empty() && final_update != last_local_update
-            {
-               settings.last_local_update_file = Some(final_update.clone());
-               match settings.write_settings()
-               {
-                  Ok(_) => {},
-                  Err(e) => log(log_destination, format!("dejacmd-log: Error saving updated last_update_file '{}' to settings: {}", final_update, e)),
-               }
-            }
-         }
-         if central_result.is_err()
-         {
-            for msg in &central_error_messages
-            {
-               log(log_destination, format!("Central apply_database_updates: {}", msg));
-            }
-         }         
-         else
-         {
-            let final_update = new_last_central_update.take();
-            if !final_update.is_empty() && final_update != last_central_update
-            {
-               settings.last_central_update_file = Some(final_update.clone());
-               match settings.write_settings()
-               {
-                  Ok(_) => {},
-                  Err(e) => log(log_destination, format!("dejacmd-log: Error saving updated last_update_file '{}' to settings: {}", final_update, e)),
-               }
-            }
-         }
-      }
-   }
-   
-}
+const EMPTY_REGEX: &str = r"^\s*'(\d+).*";
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode
@@ -207,7 +45,7 @@ async fn main() -> std::process::ExitCode
    sqlx::any::install_default_drivers(); // According to sqlx/src/any/install_drivers_note.md to prevent panic
    apply_database_updates(&args.log_destination).await;
 
-   // 66774  2026-01-13 17:45:51 ls -ltrh 
+   // 66774  2026-01-13 17:45:51 ls -ltrh
    let re = Regex::new(REGEX).unwrap();
 
    let text = args.history;
@@ -221,7 +59,18 @@ async fn main() -> std::process::ExitCode
    }
    else
    {
-      log(&args.log_destination, format!("{} '{}'", "dejacmd-log: Failed to parse history line:", &text));
+      let re = Regex::new(EMPTY_REGEX).unwrap();
+      match re.captures(&text)
+      {
+         Some(_) =>
+         {
+            return std::process::ExitCode::from(0);
+         },
+         None =>
+         {
+            log(&args.log_destination, format!("{} '{}'", "dejacmd-log: Failed to parse history line:", &text));
+         }
+      }
       return std::process::ExitCode::from(1);
    }
    let ip = match localip::get_local_ip()
@@ -235,7 +84,9 @@ async fn main() -> std::process::ExitCode
       Ok(p) => p.display().to_string(),
       Err(_e) => "".to_string()
    };
-   let settings = match Settings::new().get_settings()
+   let mut settings = Settings::new();
+   settings = settings.get_settings_or_default();
+   let settings = match settings.get_settings()
    {
       Ok(s) => s,
       Err(e) =>
@@ -249,7 +100,7 @@ async fn main() -> std::process::ExitCode
    };
 
    // println!("local database URL: {}", settings.get_local_database_url().yellow());
-   
+
    let (shell, os_user_id, os_user, cwd) = get_process_info().await;
    let id = ShortUuid::generate();
    let mut local_error_messages: Vec<String> = vec![];
@@ -398,13 +249,13 @@ async fn main() -> std::process::ExitCode
    let mut status = 0;
    if local_result.is_err()
    {
-      log(&args.log_destination, 
+      log(&args.log_destination,
          format!("{} ({}) {}", "dejacmd-log: Error inserting command into local history database:", local_location, local_result.err().unwrap().to_string()));
       status |= 1;
    }
    if central_result.is_err()
    {
-      log(&args.log_destination, 
+      log(&args.log_destination,
          format!("{} ({}) {}", "dejacmd-log: Error inserting command into central history database:", central_location, central_result.err().unwrap().to_string()));
       status |= 2;
    }
@@ -425,6 +276,168 @@ async fn main() -> std::process::ExitCode
    std::process::ExitCode::from(status)
 }
 
+async fn apply_database_updates(log_destination: &str)
+//----------------------------------------------------------------------------------------------------------------------
+{
+   let settings_file = match Settings::get_settings_path()
+   {
+      Ok(p) => p.display().to_string(),
+      Err(_e) => "".to_string()
+   };
+   let mut settings = match Settings::new().get_settings()
+   {
+      Ok(s) => s,
+      Err(e) =>
+      {
+         log(&log_destination,
+            format!("{} {} [{}] - {}", "dejacmd-log: Error loading settings file ", settings_file, e,
+               "Creating/using default settings with SQLite database."));
+         _ = Settings::write_default_settings();
+         Settings::default()
+      }
+   };
+   let last_local_update = settings.last_local_update_file.clone().unwrap_or_else(|| "0000000.sql".to_string());
+   let last_central_update = settings.last_central_update_file.clone().unwrap_or_else(|| "0000000.sql".to_string());
+
+   // Collect and sort SQL update files
+   let mut sql_files: Vec<_> = ASSETS_DIR.files()
+      .filter(|file| {
+         let path_str = file.path().to_string_lossy();
+         path_str.ends_with(".sql") &&
+         path_str.chars().take(7).all(|c| c.is_ascii_digit() || c == '/')
+      })
+      .collect();
+
+   sql_files.sort_by_key(|file| {
+      file.path().file_name().and_then(|n| n.to_str()).unwrap_or("")
+   });
+   let last_file = sql_files.last()
+      .and_then(|file| file.path().file_name().and_then(|n| n.to_str()))
+      .unwrap_or("");
+   if last_file <= last_local_update.as_str() && last_file <= last_central_update.as_str()
+   {
+      return;
+   }
+
+   let new_last_local_update: AtomicCell<String> = AtomicCell::new("".to_string());
+   let new_last_central_update: AtomicCell<String> = AtomicCell::new("".to_string());
+   let (local_pool_opt, local_scheme, central_pool_opt, central_scheme) = match connections(&settings, false, false).await
+   {
+      Ok(c) => c,
+      Err(e) =>
+      {
+         log(log_destination, format!("dejacmd-log: apply_database_updates: Error connecting to database(s): {}", e));
+         return;
+      }
+   };
+
+   // Execute updates after the last one
+   for file in sql_files
+   {
+      let filename = file.path().file_name()
+         .and_then(|n| n.to_str())
+         .unwrap_or("");
+
+      // Read and execute the SQL script
+      let mut local_error_messages: Vec<String> = vec![];
+      let mut central_error_messages: Vec<String> = vec![];
+      if let Some(sql_content) = file.contents_utf8()
+      {
+         let local_queries = async
+         //==========================================================
+         {
+            if local_pool_opt.is_none()
+            {
+               return Ok(sqlx::any::AnyQueryResult::default());
+            }
+            if filename <= last_local_update.as_str()
+            {
+               return Ok(sqlx::any::AnyQueryResult::default());
+            }
+
+            let pool = local_pool_opt.as_ref().unwrap();
+            let sql = dejacmd::fix_placeholders(sql_content, &local_scheme);
+            let result =  sqlx::query(&sql).execute(pool).await;
+            if result.is_err()
+            {
+               local_error_messages.push(format!("dejacmd-log: Failed to execute update {}: {}", filename, result.as_ref().err().unwrap().to_string()));
+            }
+            else
+            {
+               new_last_local_update.store(filename.to_string());
+            }
+            result
+         };
+         let central_queries = async
+         //============================================================
+         {
+            if central_pool_opt.is_none()
+            {
+               return Ok(sqlx::any::AnyQueryResult::default());
+            }
+            if filename <= last_central_update.as_str()
+            {
+               return Ok(sqlx::any::AnyQueryResult::default());
+            }
+            let pool = central_pool_opt.as_ref().unwrap();
+            let sql = dejacmd::fix_placeholders(sql_content, &central_scheme);
+            let result =  sqlx::query(&sql).execute(pool).await;
+            if result.is_err()
+            {
+               central_error_messages.push(format!("dejacmd-log: Failed to execute update {}: {}", filename, result.as_ref().err().unwrap().to_string()));
+            }
+            else
+            {
+               new_last_central_update.store(filename.to_string());
+            }
+            result
+         };
+
+         let (local_result, central_result) = tokio::join!(local_queries, central_queries);
+         if local_result.is_err()
+         {
+            for msg in &local_error_messages
+            {
+               log(log_destination, format!("Local apply_database_updates: {}", msg));
+            }
+         }
+         else
+         {
+            let final_update = new_last_local_update.take();
+            if !final_update.is_empty() && final_update != last_local_update
+            {
+               settings.last_local_update_file = Some(final_update.clone());
+               match settings.write_settings()
+               {
+                  Ok(_) => {},
+                  Err(e) => log(log_destination, format!("dejacmd-log: Error saving updated last_update_file '{}' to settings: {}", final_update, e)),
+               }
+            }
+         }
+         if central_result.is_err()
+         {
+            for msg in &central_error_messages
+            {
+               log(log_destination, format!("Central apply_database_updates: {}", msg));
+            }
+         }
+         else
+         {
+            let final_update = new_last_central_update.take();
+            if !final_update.is_empty() && final_update != last_central_update
+            {
+               settings.last_central_update_file = Some(final_update.clone());
+               match settings.write_settings()
+               {
+                  Ok(_) => {},
+                  Err(e) => log(log_destination, format!("dejacmd-log: Error saving updated last_update_file '{}' to settings: {}", final_update, e)),
+               }
+            }
+         }
+      }
+   }
+
+}
 
 fn log(destination: &str, message: String)
 //------------------------------------------------
@@ -438,7 +451,7 @@ fn log(destination: &str, message: String)
       println!("{}", message);
    }
    else
-   {      
+   {
       let log_path = Path::new(&destination);
       let mut file = match OpenOptions::new()
          .create(true)
@@ -578,12 +591,12 @@ fn find_linux_shell(proc: &procfs::process::Process) -> (String, PathBuf)
 
 #[cfg(test)]
 // cargo test --bin dejacmd-log
-mod tests 
+mod tests
 {
     use regex::Regex;
 
     #[test]
-    fn test_history_regex() 
+    fn test_history_regex()
     {
         let re = Regex::new(crate::REGEX).unwrap();
         let text = "66774  2026-01-13 17:45:51 ls -ltrh ";

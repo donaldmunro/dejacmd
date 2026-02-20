@@ -9,16 +9,14 @@ Dejacmd supports databases exposed by the sqlx Rust crate, which are SQLite, Pos
 work with Linux (bash, zsh), macOS (bash, zsh) and Windows (PowerShell only) terminals.
 (It should also work with fish although it has not been tested yet.)
 
-There are currently three command line programs that combine to provide dejacmd's functionality:
+There are currently two command line programs that combine to provide dejacmd's functionality:
 
 * `dejacmd-log`: This program is intended to be called from your terminal's shell
   configuration file (e.g., `.bashrc`, `.zshrc`, `Microsoft.PowerShell_profile.ps1`) to log each command you execute to database(s).
-* `dejacmd-passwd`: This utility program generates encryption keys and encrypts passwords
-   for use in manual database configuration. Passwords are encrypted using AES-256-GCM encryption.  
 * `dejacmd`: This program provides a general purpose command line interface to dejacmd
    functionality, such as database url configuration, importing existing history from shell  history files, exporting the database history to shell history files and finally also searching or querying the database for previously executed commands.
 
-A fourth TUI program may still be developed in the future to provide an interactive interface to search and view command history.
+A third TUI program may still be developed in the future to provide an interactive interface to search and view command history.
 
 The main dejacmd utility uses a command based interface with subcommands for different functionalities:
 ```
@@ -59,7 +57,7 @@ export PROMPT_COMMAND='/usr/local/bin/dejacmd-log -s $? -p $$ "$(history 1)"'
 ```
 
 A more modern approach which caters for multiple PROMPT_COMMAND uses is to use 
-[Bash-Preexec](Bash-Preexec) which emulates zsh's preexec and precmd functions:
+[bash-preexec](https://github.com/rcaloras/bash-preexec) which emulates zsh's preexec and precmd functions:
 ```bash
 #[[ -f ~/.bash-preexec.sh ]] && source ~/.bash-preexec.sh # Default as retrieved from github
 [[ -f /usr/share/bash-preexec/bash-preexec.sh ]] && source /usr/share/bash-preexec/bash-preexec.sh # Arch Linux package location for bash-preexec
@@ -173,74 +171,6 @@ Options:
           Print help
 ```
 
-Alternately the settings file can be manually edited to add the database URLs. Note the
-password is encrypted necessitating the use of the `dejacmd-passwd` utility to generate an encryption key and encrypt the password.
-
-### Password Encryption Utility
-
-The `dejacmd-passwd` utility helps you generate encryption keys and encrypt passwords for use in database configuration. This is useful when you want to manually edit the settings file.
-
-#### Generating an Encryption Key
-
-To generate a new encryption key:
-
-```bash
-dejacmd-passwd genkey
-```
-
-This will output a 64-character hexadecimal key which can be set in the settings file using the `encryption_key` field:
-
-```json
-{
-  ...
-  "encryption_key": "<your-generated-key-here>"
-  ...
-}
-```
-
-#### Encrypting a Password
-
-To encrypt a password with a key:
-
-```bash
-# Provide key and password on command line (visible in shell history)
-dejacmd-passwd encrypt -k <encryption-key> -p <password> -s
-
-# Or let it prompt you (more secure - password won't appear in shell history)
-dejacmd-passwd encrypt -k <encryption-key>
-
-# Or prompt for both key and password
-dejacmd-passwd encrypt
-```
-
-The encrypted password will be displayed as a hexadecimal string. You can use this encrypted password in settings.json:
-
-```json
-{
-  ...
-  "central_encrypted_password": "<your-encrypted-password-here>",
-  ...
-}
-```
-
-#### Example Workflow
-
-```bash
-# 1. Generate a key
-$ dejacmd-passwd genkey
-Generated encryption key:
-66312aa232b950abc5033540cad5abf056dca14affb2f67794e8d9071d92ba64
-
-# 2. Encrypt a password (will prompt for password if not provided)
-$ dejacmd-passwd encrypt -k 66312aa232b950abc5033540cad5abf056dca14affb2f67794e8d9071d92ba64
-Enter password:
-Encrypted password:
-e8e85d359dd3ed8e4d1e04a2ac9bbae1fd123901a4a64f0bc4f5ced6d3f1e313a8656f13fab7a34366ebbdb4b303a2
-
-# 3. Use the encrypted password in your settings.json file
-```
-
-Note: The `dejacmd config` command with `-p` flag will automatically generate a key (if needed) and encrypt the password for you, so using `dejacmd-passwd` is optional. Use `dejacmd-passwd` when you need more control over the encryption process or want to encrypt passwords outside of the normal configuration workflow.
 
 ## Import/Export History
 You can import existing shell history into the dejacmd database using the `dejacmd import`:

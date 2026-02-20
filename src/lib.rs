@@ -61,6 +61,15 @@ pub async fn get_database(url: &str, user: &str, password: &str) -> Result<(Opti
       }
       else
       {
+         if !database_url.contains("{{user}}") || !database_url.contains("{{password}}")
+         {
+            let mut settings = Settings::new();
+            settings = settings.get_settings_or_default();
+            let errmsg = format!("Database URL for {} must contain {{{{user}}}} and {{{{password}}}} placeholders when username and password are provided.\n{}", 
+               scheme, settings);
+            // eprintln!("{}", errmsg.red());
+            return Err(Box::new(std::io::Error::other(errmsg)));
+         }
          let dburl = database_url.replace("{{user}}", user);
          let err_url = error_url.replace("{{user}}", user);
          let n = password.len();

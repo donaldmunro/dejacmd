@@ -1,5 +1,5 @@
 //#![feature(os_str_display)]
-use std::{env, fs::File, io::Write, path::PathBuf};
+use std::{fmt, env, ffi::os_str::Display, fs::File, io::Write, path::PathBuf};
 
 use aes_gcm::{ // cargo add aes-gcm
     aead::{KeyInit, OsRng},
@@ -7,6 +7,7 @@ use aes_gcm::{ // cargo add aes-gcm
 };
 
 use crate::crypt;
+use crate::crypt::generate_key;
 
 const PROGRAM: &str = "dejacmd";
 
@@ -53,6 +54,28 @@ impl Default for Settings
          last_local_update_file: None,
          last_central_update_file: None,
       }
+   }
+}
+
+impl fmt::Display for Settings
+//-----------------------------
+{
+   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result
+   {
+      let settings = match serde_json::to_string_pretty(&self)
+      {
+         | Ok(json) => json,
+         | Err(_) => format!("local_database_url: {}, local_user: {:?}, central_database_url: {:?}, central_user: {:?}",
+                            self.local_database_url, self.local_user, self.central_database_url, self.central_user)
+      };
+
+      let settings_file = match Settings::get_settings_path()
+      {
+         | Ok(p) => "(".to_string() + p.display().to_string().as_str() + ")",
+         | Err(_) => "".to_string()
+       };
+      write!(f, "Settings {}\n{}\nLocal database URL: {}, Local_user: {:?}\nCentral Database URL: {:?}, Central User: {:?}",
+             settings_file, settings, self.local_database_url, self.local_user, self.central_database_url, self.central_user)
    }
 }
 
@@ -111,14 +134,180 @@ impl Settings
       Ok(self.read_settings())
    }
 
-   pub fn get_settings_or_default(&self) -> Settings
+   pub fn get_settings_or_default(&mut self) -> Settings
    //-------------------------------------------
    {
       match self.get_settings()
       {
-         | Ok(s) => s,
-         | Err(_) => Settings::default(),
+         | Ok(mut s) => //s,
+         {  //TODO: Moving encryption key to separate file - remove later
+            match s.encryption_key.clone()
+            {
+               |  Some(k) =>
+                  {
+                     match s.set_encrypt_key(Some(k.clone()))
+                     {
+                        | Ok(_) =>
+                        {
+                           s.encryption_key = None;
+                           match s.write_settings()
+                           {
+                              | Ok(_) => (),
+                              | Err(e) =>
+                              {
+                                 s.encryption_key = Some(k);
+                                 eprintln!("Error writing settings after moving encryption key: {}", e);
+                              }
+                           }
+                        },
+                        | Err(e) =>
+                        {
+                           eprintln!("Error moving encryption key to separate file: {}", e);
+                        }
+                     }
+                  },
+                  None => { }
+            };
+            *self = s.clone();
+            s
+         }
+         | Err(_) => 
+         {
+            let s = Settings::default();
+            *self = s.clone();
+            s
+         }
       }
+   }
+
+   fn set_encrypt_key(&mut self, hex_key: Option<String>) -> Result<(), String>
+   //--------------------------------------------------------------------------
+   {
+      let encryption_file_path = match Settings::get_config_path()
+      {
+         | Ok(mut p) =>
+         {
+            p.push("encryption-key");
+            p
+         }
+         | Err(e) =>
+         {
+            let errmsg = format!("Failed to get config path for encryption key: {}", e);
+            eprintln!("{errmsg}");
+            return Err(errmsg);
+         }
+      };
+      let key = match hex_key
+      {
+         | Some(k) => k,
+         | None => generate_key()
+      };
+      if key.trim().is_empty()
+      {
+         return Err("Encryption key cannot be empty".to_string());
+      }
+      match std::fs::write(&encryption_file_path, &key)
+      {
+         | Ok(_) => (),
+         | Err(e) =>
+         {
+            let errmsg = format!("Failed to write encryption key to file {}: {}", encryption_file_path.display(), e);
+            eprintln!("{errmsg}");
+            return Err(errmsg);
+         }
+      };
+      // Restrict file permissions to owner read/write only
+      #[cfg(unix)]
+      {
+         use std::os::unix::fs::PermissionsExt;
+         let perms = std::fs::Permissions::from_mode(0o600);
+         let _ = std::fs::set_permissions(&encryption_file_path, perms);
+      }
+      #[cfg(windows)]
+      {
+         // Use icacls to remove inherited permissions and grant only the current user full control
+         if let Ok(username) = env::var("USERNAME")
+         {
+            let path_str = encryption_file_path.display().to_string();
+            let _ = std::process::Command::new("icacls")
+               .args([&path_str, "/inheritance:r", "/grant:r", &format!("{}:(R,W)", username)])
+               .output();
+         }
+      }
+      Ok(())
+   }
+
+   fn get_encryption_key(is_generate: bool) -> Result<String, String>
+   //-----------------------------------------------
+   {
+      // Read encryption key from hidden file encryption-key with read permissions only for current user
+      let encryption_file_path = match Settings::get_config_path()
+      {
+         | Ok(mut p) =>
+         {
+            p.push("encryption-key");
+            p
+         }
+         | Err(e) =>
+         {
+            let errmsg = format!("Failed to get config path for encryption key: {}", e);
+            eprintln!("{errmsg}");
+            return Err(errmsg);
+         }
+      };
+      if !encryption_file_path.exists() && is_generate
+      {
+         // generate_key() already returns a hex-encoded string (64 hex chars = 32 bytes)
+         let hex_key = generate_key();
+         match std::fs::write(&encryption_file_path, &hex_key)
+         {
+            | Ok(_) => (),
+            | Err(e) =>
+            {
+               let errmsg = format!("Failed to write encryption key to file {}: {}", encryption_file_path.display(), e);
+               eprintln!("{errmsg}");
+               return Err(errmsg);
+            }
+         };
+         // Restrict file permissions to owner read/write only
+         #[cfg(unix)]
+         {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o600);
+            let _ = std::fs::set_permissions(&encryption_file_path, perms);
+         }
+         #[cfg(windows)]
+         {
+            // Use icacls to remove inherited permissions and grant only the current user full control
+            if let Ok(username) = env::var("USERNAME")
+            {
+               let path_str = encryption_file_path.display().to_string();
+               let _ = std::process::Command::new("icacls")
+                  .args([&path_str, "/inheritance:r", "/grant:r", &format!("{}:(R,W)", username)])
+                  .output();
+            }
+         }
+         Ok(hex_key)
+      }
+      else if encryption_file_path.exists()
+      {
+         let hex_key = match std::fs::read_to_string(&encryption_file_path)
+         {
+            | Ok(key) => key.trim().to_string(),
+            | Err(e) =>
+            {
+               let errmsg = format!("Failed to read encryption key from file {}: {}", encryption_file_path.display(), e);
+               eprintln!("{errmsg}");
+               return Err(errmsg);
+            }
+         };
+         Ok(hex_key)
+      }
+      else
+      {
+         Err("Encryption key file does not exist".to_string())
+      }
+      
    }
 
    pub fn write_settings(&self) -> Result<PathBuf, std::io::Error>
@@ -225,11 +414,30 @@ impl Settings
          return Ok((user.clone(), "".to_string()));
       }
       {
-         let key = match self.encryption_key.clone()
+         let key = match Settings::get_encryption_key(false)
          {
-            |  Some(k) => k,
-               None => { return Err("Encryption key is missing".to_string()); }
+            |  Ok(k) => k,
+               Err(e) => 
+               { 
+                  return Err(format!("Encryption key is missing [{}]", e)); 
+               }
          };
+         // let mut key = match self.encryption_key.clone()
+         // {
+         //    |  Some(k) => k,
+         //       None =>
+         //       {
+         //          match Settings::get_encryption_key()
+         //          {
+         //             |  Ok(k) => k,
+         //                Err(e) => { return Err(format!("Encryption key is missing [{}]", e)); }
+         //          }
+         //       }
+         // };
+         if key.trim().is_empty() 
+         {
+            return Err("Encryption key is empty".to_string()); 
+         }         
          match crypt::decrypt(&encrypted_bytes, &key)
          {
             |  Ok(decrypted_password) =>
@@ -331,17 +539,17 @@ impl Settings
          }
          return Ok(());
       }
-      let key = match &self.encryption_key
+      let key = match Settings::get_encryption_key(true)
       {
-         |  Some(k) => k.clone(),
-            None =>
+         |  Ok(k) => k,
+            Err(e) =>
             {
-               let new_key = Aes256Gcm::generate_key(&mut OsRng);
-               self.encryption_key = Some(hex::encode(new_key));
-               self.encryption_key.clone().unwrap()
+               let errmsg = format!("Encryption key is missing and failed to generate: {}", e);
+               eprintln!("{errmsg}");
+               return Err(errmsg);
             }
-      };
-      match crypt::encrypt(&password, &key)
+      };      
+      match crypt::encrypt(password, &key)
       {
          | Ok(encrypted_data) =>
          {
@@ -410,16 +618,16 @@ impl Settings
          }
          return Ok(());
       }
-      let key = match self.encryption_key.clone()
+      let key = match Settings::get_encryption_key(true)
       {
-         |  Some(k) => k,
-            None =>
+         |  Ok(k) => k,
+            Err(e) =>
             {
-               let new_key = Aes256Gcm::generate_key(&mut OsRng);
-               self.encryption_key = Some(hex::encode(new_key));
-               self.encryption_key.clone().unwrap()
+               let errmsg = format!("Encryption key is missing and failed to generate: {}", e);
+               eprintln!("{errmsg}");
+               return Err(errmsg);
             }
-      };
+      };      
       match crypt::encrypt(&password, &key)
       {
          | Ok(encrypted_data) =>

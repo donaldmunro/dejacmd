@@ -113,7 +113,8 @@ Note: If no query is provided, you will be prompted to enter one interactively."
             When setting {{user}} and {{password}} can be used as placeholders for username and password respectively (use -u and -p options for user and password).
             Password will be encrypted in the settings file.
             Use ~ for the user home directory if using SQLite which will be fully expanded when written.
-            Examples: dejacmd config -C "postgresql://{{user}}:{{password}}@localhost/dejacmd" -u postgres -p
+            Examples: 
+            dejacmd c -C "postgresql://{{user}}:{{password}}@localhost/dejacmd" -u postgres -p
             dejacmd config -C "mysql://{{user}}:{{password}}@localhost/dejacmd" -u me -p
             dejacmd config -C "sqlite:///home/share/history/dejacmd.sqlite"#)]
       central_url: Option<String>,
