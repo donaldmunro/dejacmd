@@ -34,7 +34,7 @@ struct Args
 pub(crate) static ASSETS_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/assets");
 
 const REGEX: &str = r"^\s*(\d+)\s+(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+(.+)$";
-const EMPTY_REGEX: &str = r"^\s*'(\d+).*";
+const EMPTY_REGEX: &str = r"^\s*'\d+.*";
 
 #[tokio::main]
 async fn main() -> std::process::ExitCode
@@ -60,18 +60,12 @@ async fn main() -> std::process::ExitCode
    else
    {
       let re = Regex::new(EMPTY_REGEX).unwrap();
-      match re.captures(&text)
+      if ! re.is_match(&text)
       {
-         Some(_) =>
-         {
-            return std::process::ExitCode::from(0);
-         },
-         None =>
-         {
-            log(&args.log_destination, format!("{} '{}'", "dejacmd-log: Failed to parse history line:", &text));
-         }
+         // log(&args.log_destination, format!("{} '{}'", "dejacmd-log: Failed to parse history line:", &text));
+         return std::process::ExitCode::from(1);
       }
-      return std::process::ExitCode::from(1);
+      return std::process::ExitCode::from(0);
    }
    let ip = match localip::get_local_ip()
    {
